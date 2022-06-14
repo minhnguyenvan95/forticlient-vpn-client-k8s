@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vpn-gateway-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vpn-gateway
+  template:
+    metadata:
+      labels:
+        app: vpn-gateway
+    spec:
+      containers:
+        - name: vpn-gateway
+          image: auchandirect/forticlient
+          command: ["/bin/sh", "-c"]
+          args:
+          - /root/start.sh
+          env:
+          - name: VPN_ADDRESS
+            valueFrom:
+              secretKeyRef:
+                name: vpn-secret
+                key: VPN_ADDRESS
+                optional: false
+          - name: VPN_USERNAME
+            valueFrom:
+              secretKeyRef:
+                name: vpn-secret
+                key: VPN_USERNAME
+                optional: false
+          - name: VPN_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: vpn-secret
+                key: VPN_PASSWORD
+                optional: false
+          - name: PFX_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: vpn-secret
+                key: PFX_PASSWORD
+                optional: false      
+          ports:
+            - containerPort: 29170
+          securityContext:
+            privileged: true
+            capabilities:
+              add: ["NET_ADMIN","NET_RAW"]
+          volumeMounts:
+            - mountPath: /root/start.sh
+              name: config-vol
+              subPath: start.sh
+            - mountPath: /root/forticlient_no_interactive
+              name: config-vol
+              subPath: forticlient_no_interactive
+            - mountPath: /root/vpn_credential.pfx
+              name: secret-vol
+              subPath: vpn_credential.pfx
+      volumes:
+        - name: config-vol
+          configMap:
+            name: vpn-gateway-configmap
+            defaultMode: 0777
+            items:
+            - key: start.sh
+              path: start.sh
+            - key: forticlient_no_interactive
+              path: forticlient_no_interactive
+        - name: secret-vol
+          secret:
+            secretName: vpn-secret
+            items:
+            - key: vpn_credential.pfx
+              path: vpn_credential.pfx
