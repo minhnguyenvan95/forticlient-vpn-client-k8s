@@ -1,0 +1,69 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vpn-gateway-configmap
+data:
+  start.sh: |
+    #!/bin/sh
+
+    if [ -z "$VPN_ADDRESS" -o -z "$VPN_USERNAME" -o -z "$VPN_PASSWORD" -o -z "$PFX_PASSWORD" ]; then
+      echo "Variables VPN_ADDRESS, VPN_USERNAME, VPN_PASSWORD and PFX_PASSWORD must be set."; exit;
+    fi
+
+    mknod /dev/ppp c 108 0
+
+    echo 1 | tee /proc/sys/net/ipv4/ip_forward
+    iptables -t nat -A POSTROUTING -j MASQUERADE
+
+    # routing 29170 -> 10.56.220.110:80
+    iptables -t nat -A PREROUTING -p tcp --dport 29170 -j DNAT --to-destination 10.56.220.110:80
+
+    export VPNTIMEOUT=${VPNTIMEOUT:-5}
+
+    while [ true ]; do
+      echo "------------ VPN Starts ------------"
+      /root/forticlient_no_interactive
+      echo "------------ VPN exited ------------"
+      sleep 10
+    done
+
+  forticlient_no_interactive: |
+    #!/usr/bin/expect -f
+
+    set timeout $env(VPNTIMEOUT)
+
+    spawn "/usr/share/forticlient/opt/forticlient-sslvpn/64bit/forticlientsslvpn_cli" --server $env(VPN_ADDRESS) --vpnuser $env(VPN_USERNAME) --pkcs12 /root/vpn_credential.pfx --keepalive
+
+    # Send command
+    expect -exact "Password for VPN:"
+    send -- "$env(VPN_PASSWORD)\n"
+
+    expect -exact "Password for PKCS#12:"
+    send -- "$env(PFX_PASSWORD)\n"
+
+    expect -exact "STATUS::Connecting..."
+
+    # In case of invalid certificate
+    expect -exact "Would you like to connect to this server? (Y/N)" {
+      send -- "Y\n"
+    }
+
+    # Expect tunnel to actually start
+    expect {
+      "STATUS::Connected" {
+      } timeout {
+        send_user -- "Failed to conect to VPN after $env(VPNTIMEOUT)s\n"
+        exit 1
+      }
+    }
+
+    # Expect tunnel to stop but not exit
+    set timeout -1
+    expect {
+      "STATUS::Tunnel closed" {
+        exit 1
+      }
+      eof {
+        exit
+      }
+    }
